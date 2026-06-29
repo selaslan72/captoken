@@ -31,7 +31,7 @@
   <section class="metrics-grid">
     <div class="glass-card">
       <div class="metric-label">Toplam Harcama (Aylık)</div>
-      <div class="metric-value" id="kpi-spend">$0.00</div>
+      <div class="metric-value" id="kpi-spend">$0.0000</div>
       <div style="font-size: 0.75rem; color: var(--text-muted);">Tüm anahtarların toplamı</div>
     </div>
     <div class="glass-card">
@@ -83,7 +83,7 @@
           <div class="form-row">
             <div class="form-group">
               <label for="daily-limit">Günlük Limit ($)</label>
-              <input type="number" id="daily-limit" step="0.01" value="1.00" min="0.01" required>
+              <input type="number" id="daily-limit" step="0.01" value="1.00" min="0.0001" required>
             </div>
             <div class="form-group">
               <label for="monthly-limit">Aylık Limit ($)</label>
@@ -99,22 +99,56 @@
       <section class="glass-card">
         <h2 class="section-title"><i data-lucide="shield-check"></i> Kayıtlı Proxy Anahtarları</h2>
         <div class="keys-list" id="keys-container">
-          <!-- Dinamik olarak yüklenecek -->
           <div style="text-align: center; padding: 2rem; color: var(--text-dim);">Henüz anahtar tanımlanmadı.</div>
         </div>
       </section>
 
     </div>
 
-    <!-- Right Column: Analytics & Logs -->
+    <!-- Right Column: Simulator, Analytics & Logs -->
     <div style="display: flex; flex-direction: column; gap: 1.5rem;">
       
       <!-- Spend Chart -->
       <section class="glass-card">
         <h2 class="section-title"><i data-lucide="trending-up"></i> Son 7 Günlük Harcama Trendi ($)</h2>
-        <div style="position: relative; height: 220px; width: 100%;">
+        <div style="position: relative; height: 200px; width: 100%;">
           <canvas id="spendChart"></canvas>
         </div>
+      </section>
+
+      <!-- Canlı İstek Simülatörü (NEW FEATURE) -->
+      <section class="glass-card">
+        <h2 class="section-title"><i data-lucide="terminal"></i> Canlı İstek Simülatörü (Live Demo)</h2>
+        <form id="simulator-form" onsubmit="sendSimulatedRequest(event)">
+          <div class="sim-header">
+            <div style="width: 60%;">
+              <select id="sim-key" required style="padding: 0.5rem;">
+                <option value="">-- Anahtar Seçin --</option>
+              </select>
+            </div>
+            <div>
+              <label class="checkbox-label">
+                <input type="checkbox" id="sim-stream" checked>
+                Akış (Stream) Aktif
+              </label>
+            </div>
+          </div>
+
+          <div class="form-group" style="display: flex; gap: 0.5rem; margin-bottom: 1rem;">
+            <input type="text" id="sim-prompt" placeholder="Yapay zekaya göndermek için bir şey yazın..." required style="padding: 0.6rem;">
+            <button type="submit" class="btn btn-primary" style="width: auto; padding: 0 1.5rem;"><i data-lucide="send"></i></button>
+          </div>
+
+          <div class="form-group" style="margin-bottom: 0;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+              <span style="font-size: 0.8rem; color: var(--text-muted); font-weight: 500;">Terminal Yanıtı:</span>
+              <span id="sim-status">
+                <span class="status-badge" style="background: rgba(255, 255, 255, 0.05); color: var(--text-muted);">Beklemede</span>
+              </span>
+            </div>
+            <div class="terminal-window" id="sim-output">Yanıt almak için bir istek gönderin...</div>
+          </div>
+        </form>
       </section>
 
       <!-- Request Logs -->
@@ -131,7 +165,6 @@
               </tr>
             </thead>
             <tbody id="logs-tbody">
-              <!-- Dinamik olarak yüklenecek -->
               <tr>
                 <td colspan="4" style="text-align: center; color: var(--text-dim); padding: 1.5rem;">Henüz istek yapılmadı.</td>
               </tr>
@@ -154,7 +187,7 @@
     // Sayfa yüklendiğinde ve belirli aralıklarla verileri çek
     document.addEventListener("DOMContentLoaded", () => {
       fetchData();
-      setInterval(fetchData, 5000); // 5 saniyede bir güncelle
+      setInterval(fetchData, 5000); // 5 saniyede bir otomatik güncelle
 
       // Form gönderme olayı
       document.getElementById("create-key-form").addEventListener("submit", createKey);
@@ -172,6 +205,7 @@
         renderKeysList(keys);
         renderLogsTable(analytics.recent_logs);
         renderChart(analytics.daily_costs);
+        updateKeyDropdown(keys);
       } catch (err) {
         console.error("Veri yüklenirken hata oluştu:", err);
       }
@@ -217,7 +251,7 @@
 
             <div class="key-stats">
               <div>
-                <span>Günlük: <strong>$${Number(key.spent_today).toFixed(3)}</strong> / $${key.daily_limit.toFixed(2)}</span>
+                <span>Günlük: <strong>$${Number(key.spent_today).toFixed(4)}</strong> / $${key.daily_limit.toFixed(4)}</span>
                 <div class="key-progress">
                   <div class="key-progress-bar" style="width: ${dailyPercent}%; background: ${limitReached ? 'var(--danger-glow)' : 'var(--primary-glow)'};"></div>
                 </div>
@@ -247,7 +281,6 @@
 
       tbody.innerHTML = logs.map(log => {
         const isError = log.status_code !== 200;
-        // HTTP 429 veya 402 ise büyük ihtimal bütçe/döngü engellemesidir. Arayüzde vurgulayalım.
         const isBlocked = log.status_code === 429 || log.status_code === 402;
         const rowClass = isBlocked ? "class='loop-highlight'" : "";
 
@@ -322,6 +355,119 @@
       });
     }
 
+    function updateKeyDropdown(keys) {
+      const select = document.getElementById("sim-key");
+      const currentValue = select.value;
+      
+      // dropdown listesini yenile
+      select.innerHTML = `<option value="">-- Anahtar Seçin --</option>` + 
+        keys.map(key => `<option value="${key.id}" ${key.is_active ? '' : 'disabled'}>${escapeHTML(key.name)} (${key.provider}${key.is_active ? '' : ' - Pasif'})</option>`).join("");
+      
+      select.value = currentValue;
+    }
+
+    async function sendSimulatedRequest(e) {
+      e.preventDefault();
+      
+      const keyId = document.getElementById("sim-key").value;
+      const prompt = document.getElementById("sim-prompt").value;
+      const stream = document.getElementById("sim-stream").checked;
+      const output = document.getElementById("sim-output");
+      const status = document.getElementById("sim-status");
+
+      if (!keyId) {
+        alert("Lütfen önce bir API anahtarı seçin!");
+        return;
+      }
+
+      output.innerText = "";
+      status.innerHTML = `<span class="status-badge" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa;">Bağlanılıyor...</span>`;
+      
+      try {
+        const res = await fetch("/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${keyId}`
+          },
+          body: JSON.stringify({
+            model: "gpt-4o-mini",
+            stream: stream,
+            messages: [{ role: "user", content: prompt }]
+          })
+        });
+
+        // Hata Durumları Kontrolü
+        if (res.status === 402) {
+          status.innerHTML = `<span class="status-badge status-error">Bütçe Aşıldı (HTTP 402)</span>`;
+          const data = await res.json();
+          output.innerText = `Bütçe limiti aşıldığı için CapToken geçidi isteği engelledi.\nDetay: ${data.error.message}`;
+          fetchData();
+          return;
+        }
+        if (res.status === 429) {
+          status.innerHTML = `<span class="status-badge status-error">Döngü Koruması (HTTP 429)</span>`;
+          const data = await res.json();
+          output.innerText = `Dakika başına çok fazla istek atıldığı için (Ajan Döngüsü Riski) CapToken geçidi isteği engelledi.\nDetay: ${data.error.message}`;
+          fetchData();
+          return;
+        }
+        if (!res.ok) {
+          status.innerHTML = `<span class="status-badge status-error">Hata (HTTP ${res.status})</span>`;
+          const data = await res.json();
+          output.innerText = `Hata Mesajı:\n${JSON.stringify(data, null, 2)}`;
+          fetchData();
+          return;
+        }
+
+        status.innerHTML = `<span class="status-badge status-200">Başarılı (HTTP 200)</span>`;
+
+        if (!stream) {
+          // Non-streaming yanıt alımı
+          const data = await res.json();
+          output.innerText = data.choices[0].message.content;
+          fetchData();
+        } else {
+          // Streaming yanıt alımı
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            const chunk = decoder.decode(value, { stream: true });
+            buffer += chunk;
+            const lines = buffer.split("\n");
+            buffer = lines.pop() || "";
+
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (!trimmed.startsWith("data: ")) continue;
+              
+              const dataStr = trimmed.substring(6).trim();
+              if (dataStr === "[DONE]") continue;
+
+              try {
+                const data = JSON.parse(dataStr);
+                if (data.choices && data.choices[0]?.delta?.content) {
+                  output.innerText += data.choices[0].delta.content;
+                  // Terminali otomatik aşağı kaydır
+                  output.scrollTop = output.scrollHeight;
+                }
+              } catch(e) {}
+            }
+          }
+          // İstek bittiğinde analitik verileri yeniden çek
+          fetchData();
+        }
+      } catch (err) {
+        status.innerHTML = `<span class="status-badge status-error">Bağlantı Hatası</span>`;
+        output.innerText = `Sunucu ile iletişim kurulamadı: ${err.message}\n(Not: Gerçek bir OpenAI isteği yapıyorsanız gerçek anahtarınızın doğruluğunu ve internet bağlantınızı kontrol edin.)`;
+      }
+    }
+
     async function createKey(e) {
       e.preventDefault();
       
@@ -340,7 +486,7 @@
 
         if (res.ok) {
           document.getElementById("create-key-form").reset();
-          document.getElementById("daily-limit").value = "1.00";
+          document.getElementById("daily-limit").value = "1.0000";
           document.getElementById("monthly-limit").value = "10.00";
           fetchData();
         } else {
@@ -376,7 +522,7 @@
 
     function copyToClipboard(text) {
       navigator.clipboard.writeText(text).then(() => {
-        alert("API Anahtarı kopyalandı:\n" + text);
+        alert("CapToken API Anahtarı kopyalandı:\n" + text);
       }).catch(err => {
         console.error("Kopyalama başarısız:", err);
       });
