@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CapToken - Yapay Zeka Bütçe & Ajan Kontrol Paneli</title>
+  <link rel="stylesheet" href="style.css">
+  <!-- Chart.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- Lucide Icons CDN -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body>
+
+  <!-- Header -->
+  <header>
+    <div class="logo-container">
+      <div class="logo-icon">C</div>
+      <div class="logo-text">
+        <h1>CapToken</h1>
+        <p>AI Gateway & Budget Guard</p>
+      </div>
+    </div>
+    <div style="font-size: 0.9rem; color: var(--text-muted); display: flex; align-items: center; gap: 0.5rem;">
+      <span style="width: 8px; height: 8px; background: #10b981; border-radius: 50%; display: inline-block; box-shadow: 0 0 8px #10b981;"></span>
+      Proxy Aktif (Port: 3000)
+    </div>
+  </header>
+
+  <!-- KPI Metrics -->
+  <section class="metrics-grid">
+    <div class="glass-card">
+      <div class="metric-label">Toplam Harcama (Aylık)</div>
+      <div class="metric-value" id="kpi-spend">$0.00</div>
+      <div style="font-size: 0.75rem; color: var(--text-muted);">Tüm anahtarların toplamı</div>
+    </div>
+    <div class="glass-card">
+      <div class="metric-label">Toplam İstek</div>
+      <div class="metric-value" id="kpi-requests">0</div>
+      <div style="font-size: 0.75rem; color: var(--text-muted);">Başarılı ve hatalı istekler</div>
+    </div>
+    <div class="glass-card">
+      <div class="metric-label">Toplam Token</div>
+      <div class="metric-value" id="kpi-tokens">0</div>
+      <div style="font-size: 0.75rem; color: var(--text-muted);">Giriş ve çıkış tokenları</div>
+    </div>
+    <div class="glass-card">
+      <div class="metric-label">Aktif Anahtarlar</div>
+      <div class="metric-value" id="kpi-keys">0</div>
+      <div style="font-size: 0.75rem; color: var(--text-muted);">Sistemde tanımlı yetkiler</div>
+    </div>
+  </section>
+
+  <!-- Main Grid Layout -->
+  <div class="dashboard-grid">
+    
+    <!-- Left Column: Key Creation & Key List -->
+    <div style="display: flex; flex-direction: column; gap: 1.5rem;">
+      
+      <!-- Create Key Form -->
+      <section class="glass-card">
+        <h2 class="section-title"><i data-lucide="key-round"></i> Yeni Proxy Anahtarı Oluştur</h2>
+        <form id="create-key-form">
+          <div class="form-group">
+            <label for="key-name">Anahtar İsmi / Tanımı</label>
+            <input type="text" id="key-name" placeholder="Örn: Müşteri Destek Ajanı veya Geliştirme Aşaması" required>
+          </div>
+          
+          <div class="form-row">
+            <div class="form-group">
+              <label for="key-provider">Yapay Zeka Sağlayıcısı</label>
+              <select id="key-provider">
+                <option value="openai">OpenAI</option>
+                <option value="gemini">Google Gemini</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="target-key">Gerçek API Anahtarı (sk-...)</label>
+              <input type="password" id="target-key" placeholder="API Key" required>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="daily-limit">Günlük Limit ($)</label>
+              <input type="number" id="daily-limit" step="0.01" value="1.00" min="0.01" required>
+            </div>
+            <div class="form-group">
+              <label for="monthly-limit">Aylık Limit ($)</label>
+              <input type="number" id="monthly-limit" step="0.01" value="10.00" min="0.01" required>
+            </div>
+          </div>
+
+          <button type="submit" class="btn btn-primary"><i data-lucide="plus-circle"></i> Anahtarı Oluştur</button>
+        </form>
+      </section>
+
+      <!-- Key List -->
+      <section class="glass-card">
+        <h2 class="section-title"><i data-lucide="shield-check"></i> Kayıtlı Proxy Anahtarları</h2>
+        <div class="keys-list" id="keys-container">
+          <!-- Dinamik olarak yüklenecek -->
+          <div style="text-align: center; padding: 2rem; color: var(--text-dim);">Henüz anahtar tanımlanmadı.</div>
+        </div>
+      </section>
+
+    </div>
+
+    <!-- Right Column: Analytics & Logs -->
+    <div style="display: flex; flex-direction: column; gap: 1.5rem;">
+      
+      <!-- Spend Chart -->
+      <section class="glass-card">
+        <h2 class="section-title"><i data-lucide="trending-up"></i> Son 7 Günlük Harcama Trendi ($)</h2>
+        <div style="position: relative; height: 220px; width: 100%;">
+          <canvas id="spendChart"></canvas>
+        </div>
+      </section>
+
+      <!-- Request Logs -->
+      <section class="glass-card">
+        <h2 class="section-title"><i data-lucide="activity"></i> Son İstek Logları</h2>
+        <div class="logs-table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Anahtar</th>
+                <th>Model</th>
+                <th>Maliyet</th>
+                <th>Durum</th>
+              </tr>
+            </thead>
+            <tbody id="logs-tbody">
+              <!-- Dinamik olarak yüklenecek -->
+              <tr>
+                <td colspan="4" style="text-align: center; color: var(--text-dim); padding: 1.5rem;">Henüz istek yapılmadı.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+    </div>
+
+  </div>
+
+  <!-- JavaScript Logic -->
+  <script>
+    // Lucide ikonlarını yükle
+    lucide.createIcons();
+
+    let chartInstance = null;
+
+    // Sayfa yüklendiğinde ve belirli aralıklarla verileri çek
+    document.addEventListener("DOMContentLoaded", () => {
+      fetchData();
+      setInterval(fetchData, 5000); // 5 saniyede bir güncelle
+
+      // Form gönderme olayı
+      document.getElementById("create-key-form").addEventListener("submit", createKey);
+    });
+
+    async function fetchData() {
+      try {
+        const keysRes = await fetch("/api/keys");
+        const keys = await keysRes.json();
+        
+        const analyticsRes = await fetch("/api/analytics");
+        const analytics = await analyticsRes.json();
+
+        updateKPIs(analytics, keys.length);
+        renderKeysList(keys);
+        renderLogsTable(analytics.recent_logs);
+        renderChart(analytics.daily_costs);
+      } catch (err) {
+        console.error("Veri yüklenirken hata oluştu:", err);
+      }
+    }
+
+    function updateKPIs(analytics, totalKeys) {
+      document.getElementById("kpi-spend").innerText = `$${Number(analytics.total_cost).toFixed(4)}`;
+      document.getElementById("kpi-requests").innerText = analytics.total_requests;
+      document.getElementById("kpi-tokens").innerText = analytics.total_tokens.toLocaleString();
+      document.getElementById("kpi-keys").innerText = totalKeys;
+    }
+
+    function renderKeysList(keys) {
+      const container = document.getElementById("keys-container");
+      if (keys.length === 0) {
+        container.innerHTML = `<div style="text-align: center; padding: 2rem; color: var(--text-dim);">Henüz anahtar tanımlanmadı.</div>`;
+        return;
+      }
+
+      container.innerHTML = keys.map(key => {
+        const dailyPercent = Math.min((key.spent_today / key.daily_limit) * 100, 100);
+        const limitReached = key.spent_today >= key.daily_limit;
+
+        return `
+          <div class="key-card">
+            <div class="key-header">
+              <div class="key-name-badge">
+                <span class="key-name">${escapeHTML(key.name)}</span>
+                <span class="provider-badge">${key.provider}</span>
+              </div>
+              <label class="switch">
+                <input type="checkbox" ${key.is_active ? 'checked' : ''} onchange="toggleKey('${key.id}', this.checked)">
+                <span class="slider"></span>
+              </label>
+            </div>
+            
+            <div class="key-value-row">
+              <span id="key-val-${key.id}">captoken_...${key.id.substring(key.id.length - 8)}</span>
+              <button class="copy-btn" onclick="copyToClipboard('${key.id}')" title="Kopyala">
+                <i data-lucide="copy" style="width: 14px; height: 14px;"></i>
+              </button>
+            </div>
+
+            <div class="key-stats">
+              <div>
+                <span>Günlük: <strong>$${Number(key.spent_today).toFixed(3)}</strong> / $${key.daily_limit.toFixed(2)}</span>
+                <div class="key-progress">
+                  <div class="key-progress-bar" style="width: ${dailyPercent}%; background: ${limitReached ? 'var(--danger-glow)' : 'var(--primary-glow)'};"></div>
+                </div>
+              </div>
+              <div style="text-align: right; display: flex; flex-direction: column; justify-content: space-between;">
+                <span>Aylık Limit: <strong>$${key.monthly_limit.toFixed(2)}</strong></span>
+                <div class="key-actions">
+                  <button class="action-icon action-delete" onclick="deleteKey('${key.id}')" title="Sil">
+                    <i data-lucide="trash-2" style="width: 14px; height: 14px;"></i>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join("");
+
+      lucide.createIcons();
+    }
+
+    function renderLogsTable(logs) {
+      const tbody = document.getElementById("logs-tbody");
+      if (!logs || logs.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--text-dim); padding: 1.5rem;">Henüz istek yapılmadı.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = logs.map(log => {
+        const isError = log.status_code !== 200;
+        // HTTP 429 veya 402 ise büyük ihtimal bütçe/döngü engellemesidir. Arayüzde vurgulayalım.
+        const isBlocked = log.status_code === 429 || log.status_code === 402;
+        const rowClass = isBlocked ? "class='loop-highlight'" : "";
+
+        return `
+          <tr ${rowClass}>
+            <td>
+              <div style="font-weight: 500;">${escapeHTML(log.key_name)}</div>
+              <div style="font-size: 0.7rem; color: var(--text-dim);">${new Date(log.timestamp).toLocaleTimeString()}</div>
+            </td>
+            <td style="font-size: 0.8rem; color: var(--text-muted);">${escapeHTML(log.model)}</td>
+            <td style="font-weight: 600;">$${Number(log.cost).toFixed(4)}</td>
+            <td>
+              <span class="status-badge ${isError ? 'status-error' : 'status-200'}">
+                ${log.status_code}
+              </span>
+            </td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    function renderChart(dailyCosts) {
+      const ctx = document.getElementById('spendChart').getContext('2d');
+      
+      const labels = dailyCosts.map(d => {
+        const parts = d.date.split("-");
+        return `${parts[2]}/${parts[1]}`; // DD/MM formatı
+      });
+      const data = dailyCosts.map(d => d.cost);
+
+      if (chartInstance) {
+        chartInstance.data.labels = labels;
+        chartInstance.data.datasets[0].data = data;
+        chartInstance.update();
+        return;
+      }
+
+      chartInstance = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: 'Günlük Harcama ($)',
+            data: data,
+            borderColor: '#8b5cf6',
+            backgroundColor: 'rgba(139, 92, 246, 0.05)',
+            borderWidth: 2,
+            tension: 0.3,
+            fill: true,
+            pointBackgroundColor: '#3b82f6',
+            pointBorderColor: '#fff',
+            pointHoverRadius: 6
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false }
+          },
+          scales: {
+            x: {
+              grid: { color: 'rgba(255, 255, 255, 0.03)' },
+              ticks: { color: '#9ca3af', font: { family: 'Outfit' } }
+            },
+            y: {
+              grid: { color: 'rgba(255, 255, 255, 0.03)' },
+              ticks: { color: '#9ca3af', font: { family: 'Outfit' } }
+            }
+          }
+        }
+      });
+    }
+
+    async function createKey(e) {
+      e.preventDefault();
+      
+      const name = document.getElementById("key-name").value;
+      const provider = document.getElementById("key-provider").value;
+      const target_api_key = document.getElementById("target-key").value;
+      const daily_limit = parseFloat(document.getElementById("daily-limit").value);
+      const monthly_limit = parseFloat(document.getElementById("monthly-limit").value);
+
+      try {
+        const res = await fetch("/api/keys", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, provider, target_api_key, daily_limit, monthly_limit })
+        });
+
+        if (res.ok) {
+          document.getElementById("create-key-form").reset();
+          document.getElementById("daily-limit").value = "1.00";
+          document.getElementById("monthly-limit").value = "10.00";
+          fetchData();
+        } else {
+          alert("Anahtar oluşturulurken bir hata oluştu.");
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    async function toggleKey(id, isChecked) {
+      try {
+        await fetch(`/api/keys/${id}/toggle`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ is_active: isChecked })
+        });
+        fetchData();
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    async function deleteKey(id) {
+      if (!confirm("Bu anahtarı silmek istediğinize emin misiniz?")) return;
+      try {
+        await fetch(`/api/keys/${id}`, { method: "DELETE" });
+        fetchData();
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    function copyToClipboard(text) {
+      navigator.clipboard.writeText(text).then(() => {
+        alert("API Anahtarı kopyalandı:\n" + text);
+      }).catch(err => {
+        console.error("Kopyalama başarısız:", err);
+      });
+    }
+
+    function escapeHTML(str) {
+      return str.replace(/[&<>'"]/g, 
+        tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[tag] || tag)
+      );
+    }
+  </script>
+</body>
+</html>
