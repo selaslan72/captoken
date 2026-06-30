@@ -7,6 +7,7 @@ import dotenv from "dotenv";
 import { initDB } from "./db.js";
 import { registerProxyRoutes } from "./proxy.js";
 import { registerDashboardRoutes } from "./dashboard.js";
+import { verifyAdminSession } from "./utils.js";
 
 dotenv.config();
 
@@ -25,6 +26,31 @@ async function main() {
     // 2. CORS desteğini aktif et
     await server.register(cors, {
       origin: true,
+    });
+
+    // Yönetici Oturumu Yetkilendirme Denetimi (preHandler Hook)
+    server.addHook("preHandler", async (request, reply) => {
+      const url = request.url;
+
+      // Yönetici API rotalarını koru (Giriş API'si hariç)
+      if (url.startsWith("/api/") && url !== "/api/login") {
+        const cookieHeader = request.headers.cookie || "";
+        const token = cookieHeader.split("token=")[1]?.split(";")[0]?.trim();
+        
+        if (!token || !verifyAdminSession(token)) {
+          return reply.code(401).send({ error: "Unauthorized" });
+        }
+      }
+
+      // Kontrol Paneli ana sayfasını koru (Oturum yoksa login.html'e yönlendir)
+      if (url === "/" || url.startsWith("/index.html")) {
+        const cookieHeader = request.headers.cookie || "";
+        const token = cookieHeader.split("token=")[1]?.split(";")[0]?.trim();
+        
+        if (!token || !verifyAdminSession(token)) {
+          return reply.redirect("/login.html");
+        }
+      }
     });
 
     // 3. Kontrol Paneli (Frontend) için statik dosyaları sun

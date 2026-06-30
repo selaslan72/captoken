@@ -21,9 +21,14 @@
         <p>AI Gateway & Budget Guard</p>
       </div>
     </div>
-    <div style="font-size: 0.9rem; color: var(--text-muted); display: flex; align-items: center; gap: 0.5rem;">
-      <span style="width: 8px; height: 8px; background: #10b981; border-radius: 50%; display: inline-block; box-shadow: 0 0 8px #10b981;"></span>
-      Proxy Aktif (Port: 3000)
+    <div style="display: flex; align-items: center; gap: 1.5rem;">
+      <div style="font-size: 0.9rem; color: var(--text-muted); display: flex; align-items: center; gap: 0.5rem;">
+        <span style="width: 8px; height: 8px; background: #10b981; border-radius: 50%; display: inline-block; box-shadow: 0 0 8px #10b981;"></span>
+        Proxy Aktif (Port: 3000)
+      </div>
+      <button onclick="logoutAdmin()" class="btn" style="width: auto; background: rgba(244, 63, 94, 0.1); border: 1px solid rgba(244, 63, 94, 0.2); color: #fb7185; padding: 0.4rem 0.8rem; font-size: 0.85rem; border-radius: 6px; display: flex; align-items: center; gap: 0.25rem;">
+        <i data-lucide="log-out" style="width: 14px; height: 14px;"></i> Çıkış
+      </button>
     </div>
   </header>
 
@@ -193,12 +198,30 @@
       document.getElementById("create-key-form").addEventListener("submit", createKey);
     });
 
+    async function logoutAdmin() {
+      if (!confirm("Oturumu kapatmak istediğinize emin misiniz?")) return;
+      try {
+        await fetch("/api/logout", { method: "POST" });
+        window.location.href = "/login.html";
+      } catch (err) {
+        console.error("Çıkış yapılırken hata oluştu:", err);
+      }
+    }
+
     async function fetchData() {
       try {
         const keysRes = await fetch("/api/keys");
+        if (keysRes.status === 401) {
+          window.location.href = "/login.html";
+          return;
+        }
         const keys = await keysRes.json();
         
         const analyticsRes = await fetch("/api/analytics");
+        if (analyticsRes.status === 401) {
+          window.location.href = "/login.html";
+          return;
+        }
         const analytics = await analyticsRes.json();
 
         updateKPIs(analytics, keys.length);
@@ -229,12 +252,33 @@
         const dailyPercent = Math.min((key.spent_today / key.daily_limit) * 100, 100);
         const limitReached = key.spent_today >= key.daily_limit;
 
+        // Hedef yedek anahtarların listesini oluştur
+        const targetsHtml = key.targets ? key.targets.map(t => `
+          <div style="display: flex; align-items: center; justify-content: space-between; font-size: 0.75rem; background: rgba(0,0,0,0.2); padding: 0.4rem 0.6rem; border-radius: 8px; margin-top: 0.4rem; border: 1px solid rgba(255,255,255,0.02); gap: 0.5rem;">
+            <div style="display: flex; align-items: center; gap: 0.4rem; overflow: hidden; width: 75%;">
+              <span class="provider-badge" style="font-size: 0.55rem; padding: 0.1rem 0.3rem; flex-shrink: 0;">${t.provider}</span>
+              <span style="font-family: monospace; color: var(--text-muted); text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">${t.target_api_key}</span>
+              <span style="color: var(--text-dim); font-size: 0.65rem; flex-shrink: 0;">(P: ${t.priority})</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+              <label class="switch" style="transform: scale(0.75); margin: -3px;">
+                <input type="checkbox" ${t.is_active ? 'checked' : ''} onchange="toggleTargetKey('${t.id}', this.checked)">
+                <span class="slider"></span>
+              </label>
+              ${key.targets.length > 1 ? `
+                <button class="action-icon action-delete" onclick="deleteTargetKey('${t.id}')" title="Hedef Key Sil" style="padding: 0;">
+                  <i data-lucide="x" style="width: 12px; height: 12px;"></i>
+                </button>
+              ` : ''}
+            </div>
+          </div>
+        `).join("") : "";
+
         return `
           <div class="key-card">
             <div class="key-header">
               <div class="key-name-badge">
                 <span class="key-name">${escapeHTML(key.name)}</span>
-                <span class="provider-badge">${key.provider}</span>
               </div>
               <label class="switch">
                 <input type="checkbox" ${key.is_active ? 'checked' : ''} onchange="toggleKey('${key.id}', this.checked)">
@@ -262,6 +306,36 @@
                   <button class="action-icon action-delete" onclick="deleteKey('${key.id}')" title="Sil">
                     <i data-lucide="trash-2" style="width: 14px; height: 14px;"></i>
                   </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Çoklu API Anahtarı Yönetim Katmanı (Load Balancing) -->
+            <div style="margin-top: 1.25rem; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 0.75rem;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem;">
+                <span style="font-size: 0.8rem; color: var(--text-muted); font-weight: 500;">Hedef API Keyler (Yük Dengeleme):</span>
+                <button onclick="toggleAddTargetForm('${key.id}')" class="btn" style="width: auto; padding: 0.2rem 0.4rem; font-size: 0.7rem; background: rgba(139, 92, 246, 0.15); border: 1px solid rgba(139, 92, 246, 0.25); color: #c084fc; border-radius: 4px; display: flex; align-items: center; gap: 0.15rem;">
+                  <i data-lucide="plus" style="width: 10px; height: 10px;"></i> Ekle
+                </button>
+              </div>
+              
+              <div id="targets-list-${key.id}">
+                ${targetsHtml}
+              </div>
+
+              <!-- Inline Add Target Form -->
+              <div id="add-target-form-${key.id}" style="display: none; background: rgba(0,0,0,0.2); border: 1px dashed rgba(255,255,255,0.08); border-radius: 8px; padding: 0.75rem; margin-top: 0.5rem;">
+                <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
+                  <select id="new-target-provider-${key.id}" style="padding: 0.35rem; font-size: 0.75rem; width: 60%;">
+                    <option value="openai">OpenAI</option>
+                    <option value="gemini">Gemini</option>
+                  </select>
+                  <input type="number" id="new-target-priority-${key.id}" value="1" min="1" placeholder="Öncelik" style="padding: 0.35rem; font-size: 0.75rem; width: 40%;">
+                </div>
+                <input type="password" id="new-target-key-${key.id}" placeholder="Gerçek API Anahtarı (sk-...)" style="padding: 0.35rem; font-size: 0.75rem; margin-bottom: 0.5rem; width: 100%;">
+                <div style="display: flex; gap: 0.5rem; justify-content: flex-end;">
+                  <button onclick="toggleAddTargetForm('${key.id}')" class="btn" style="width: auto; padding: 0.25rem 0.5rem; font-size: 0.7rem; background: rgba(255,255,255,0.05); color: var(--text-muted); border-radius: 4px;">İptal</button>
+                  <button onclick="submitAddTargetKey('${key.id}')" class="btn btn-primary" style="width: auto; padding: 0.25rem 0.5rem; font-size: 0.7rem; border-radius: 4px;">Kaydet</button>
                 </div>
               </div>
             </div>
@@ -515,6 +589,84 @@
       try {
         await fetch(`/api/keys/${id}`, { method: "DELETE" });
         fetchData();
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    function toggleAddTargetForm(keyId) {
+      const form = document.getElementById(`add-target-form-${keyId}`);
+      if (form.style.display === "none") {
+        form.style.display = "block";
+      } else {
+        form.style.display = "none";
+      }
+    }
+
+    async function submitAddTargetKey(keyId) {
+      const provider = document.getElementById(`new-target-provider-${keyId}`).value;
+      const priority = parseInt(document.getElementById(`new-target-priority-${keyId}`).value, 10) || 1;
+      const target_api_key = document.getElementById(`new-target-key-${keyId}`).value;
+
+      if (!target_api_key) {
+        alert("Lütfen gerçek API anahtarını girin.");
+        return;
+      }
+
+      try {
+        const res = await fetch(`/api/keys/${keyId}/targets`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ provider, priority, target_api_key })
+        });
+
+        if (res.status === 401) {
+          window.location.href = "/login.html";
+          return;
+        }
+
+        if (res.ok) {
+          fetchData();
+        } else {
+          const data = await res.json();
+          alert("Hata: " + (data.error || "Yedek anahtar eklenemedi."));
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    async function toggleTargetKey(targetId, isChecked) {
+      try {
+        const res = await fetch(`/api/targets/${targetId}/toggle`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ is_active: isChecked })
+        });
+        if (res.status === 401) {
+          window.location.href = "/login.html";
+          return;
+        }
+        fetchData();
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    async function deleteTargetKey(targetId) {
+      if (!confirm("Bu yedek anahtarı silmek istediğinize emin misiniz?")) return;
+      try {
+        const res = await fetch(`/api/targets/${targetId}`, { method: "DELETE" });
+        if (res.status === 401) {
+          window.location.href = "/login.html";
+          return;
+        }
+        if (res.ok) {
+          fetchData();
+        } else {
+          const data = await res.json();
+          alert("Hata: " + (data.error || "Yedek anahtar silinemedi."));
+        }
       } catch (err) {
         console.error(err);
       }

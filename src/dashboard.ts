@@ -1,7 +1,28 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
-import { createApiKey, listApiKeys, deleteApiKey, toggleApiKey, getAnalytics } from "./db.js";
+import { createApiKey, listApiKeys, deleteApiKey, toggleApiKey, getAnalytics, addTargetKey, deleteTargetKey, toggleTargetKey } from "./db.js";
+import { generateAdminSession } from "./utils.js";
 
 export function registerDashboardRoutes(fastify: FastifyInstance) {
+  // Yönetici Giriş (Login)
+  fastify.post("/api/login", async (request: FastifyRequest, reply: FastifyReply) => {
+    const body: any = request.body;
+    const adminPassword = process.env.ADMIN_PASSWORD || "admin";
+    
+    if (body && body.password === adminPassword) {
+      const sessionToken = generateAdminSession();
+      reply.header("Set-Cookie", `token=${sessionToken}; HttpOnly; Path=/; Max-Age=86400; SameSite=Strict`);
+      return { success: true };
+    } else {
+      return reply.code(401).send({ error: "Geçersiz şifre!" });
+    }
+  });
+
+  // Yönetici Çıkış (Logout)
+  fastify.post("/api/logout", async (request: FastifyRequest, reply: FastifyReply) => {
+    reply.header("Set-Cookie", "token=; HttpOnly; Path=/; Max-Age=0; SameSite=Strict");
+    return { success: true };
+  });
+
   // Tüm API anahtarlarını listele
   fastify.get("/api/keys", async (request: FastifyRequest, reply: FastifyReply) => {
     try {
@@ -69,6 +90,48 @@ export function registerDashboardRoutes(fastify: FastifyInstance) {
       return data;
     } catch (error: any) {
       return reply.code(500).send({ error: error.message || "Failed to fetch analytics" });
+    }
+  });
+
+  // Yeni hedef key ekle
+  fastify.post("/api/keys/:id/targets", async (request: FastifyRequest, reply: FastifyReply) => {
+    const { id } = request.params as { id: string };
+    const body: any = request.body;
+    if (!body.target_api_key || !body.provider) {
+      return reply.code(400).send({ error: "Missing target_api_key or provider" });
+    }
+    try {
+      const priority = body.priority !== undefined ? Number(body.priority) : 1;
+      const target = await addTargetKey(id, body.target_api_key, body.provider, priority);
+      return target;
+    } catch (error: any) {
+      return reply.code(500).send({ error: error.message || "Failed to add target key" });
+    }
+  });
+
+  // Hedef key sil
+  fastify.delete("/api/targets/:targetId", async (request: FastifyRequest, reply: FastifyReply) => {
+    const { targetId } = request.params as { targetId: string };
+    try {
+      await deleteTargetKey(targetId);
+      return { success: true };
+    } catch (error: any) {
+      return reply.code(500).send({ error: error.message || "Failed to delete target key" });
+    }
+  });
+
+  // Hedef key aktif/pasif yap
+  fastify.patch("/api/targets/:targetId/toggle", async (request: FastifyRequest, reply: FastifyReply) => {
+    const { targetId } = request.params as { targetId: string };
+    const body: any = request.body;
+    if (body.is_active === undefined) {
+      return reply.code(400).send({ error: "Missing is_active field" });
+    }
+    try {
+      await toggleTargetKey(targetId, Boolean(body.is_active));
+      return { success: true };
+    } catch (error: any) {
+      return reply.code(500).send({ error: error.message || "Failed to toggle target key status" });
     }
   });
 }

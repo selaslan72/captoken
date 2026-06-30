@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CapToken - Admin Girişi</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      margin: 0;
+      padding: 0;
+    }
+    .login-container {
+      width: 100%;
+      max-width: 400px;
+      padding: 2.5rem;
+      text-align: center;
+    }
+    .login-logo {
+      width: 54px;
+      height: 54px;
+      background: var(--primary-glow);
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2rem;
+      color: #fff;
+      font-weight: 700;
+      box-shadow: 0 0 20px rgba(139, 92, 246, 0.4);
+      margin: 0 auto 1.5rem auto;
+    }
+    .login-title {
+      font-size: 1.6rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+      background: linear-gradient(to right, #fff, #a78bfa);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .login-subtitle {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      margin-bottom: 2rem;
+    }
+    .error-msg {
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: #f87171;
+      padding: 0.75rem;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      margin-bottom: 1.5rem;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      animation: shake 0.4s ease-in-out;
+    }
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      25% { transform: translateX(-6px); }
+      75% { transform: translateX(6px); }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="login-container glass-card">
+    <div class="login-logo">C</div>
+    <h2 class="login-title">CapToken</h2>
+    <p class="login-subtitle">Yönetici Paneli Girişi</p>
+
+    <div class="error-msg" id="error-container">
+      <i data-lucide="alert-circle" style="width: 16px; height: 16px;"></i>
+      <span id="error-text">Hatalı şifre girdiniz!</span>
+    </div>
+
+    <form id="login-form">
+      <div class="form-group" style="text-align: left; margin-bottom: 1.5rem;">
+        <label for="admin-password">Yönetici Şifresi</label>
+        <div style="position: relative;">
+          <input type="password" id="admin-password" placeholder="••••••••" required style="padding-left: 2.5rem;">
+          <i data-lucide="lock" style="position: absolute; left: 0.9rem; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; color: var(--text-dim);"></i>
+        </div>
+      </div>
+
+      <button type="submit" class="btn btn-primary" id="login-btn">
+        <i data-lucide="log-in"></i> Giriş Yap
+      </button>
+    </form>
+  </div>
+
+  <script>
+    lucide.createIcons();
+
+    document.getElementById("login-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      
+      const password = document.getElementById("admin-password").value;
+      const errorContainer = document.getElementById("error-container");
+      const errorText = document.getElementById("error-text");
+      const loginBtn = document.getElementById("login-btn");
+
+      errorContainer.style.display = "none";
+      loginBtn.disabled = true;
+      loginBtn.innerHTML = "Giriş yapılıyor...";
+
+      try {
+        const res = await fetch("/api/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password })
+        });
+
+        if (res.ok) {
+          window.location.href = "/index.html";
+        } else {
+          const data = await res.json();
+          errorText.innerText = data.error || "Giriş başarısız!";
+          errorContainer.style.display = "flex";
+          // Yeniden shake animasyonunu tetikle
+          errorContainer.style.animation = "none";
+          errorContainer.offsetHeight; // layout reflow trigger
+          errorContainer.style.animation = "shake 0.4s ease-in-out";
+        }
+      } catch (err) {
+        errorText.innerText = "Sunucu bağlantı hatası!";
+        errorContainer.style.display = "flex";
+      } finally {
+        loginBtn.disabled = false;
+        loginBtn.innerHTML = '<i data-lucide="log-in"></i> Giriş Yap';
+        lucide.createIcons();
+      }
+    });
+  </script>
+</body>
+</html>

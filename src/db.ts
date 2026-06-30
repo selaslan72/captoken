@@ -2,6 +2,7 @@ import sqlite3 from "sqlite3";
 import { open, Database } from "sqlite";
 import path from "path";
 import { fileURLToPath } from "url";
+import { encrypt, decrypt } from "./utils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dbPath = path.resolve(__dirname, "../captoken.db");
@@ -30,6 +31,17 @@ export async function initDB() {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS target_keys (
+      id TEXT PRIMARY KEY,
+      api_key_id TEXT NOT NULL,
+      target_api_key TEXT NOT NULL,
+      provider TEXT DEFAULT 'openai',
+      priority INTEGER DEFAULT 1,
+      is_active INTEGER DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(api_key_id) REFERENCES api_keys(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS usage_summary (
       api_key_id TEXT,
       date TEXT,
@@ -53,7 +65,51 @@ export async function initDB() {
     );
   `);
 
+  // Düz metin olarak kalan eski anahtarları şifrele
+  await migratePlaintextKeys();
+  
+  // Eski tekli key yapısını target_keys tablosuna taşı
+  await migrateToTargetKeysTable();
+
   console.log("Database initialized at:", dbPath);
+}
+
+async function migratePlaintextKeys() {
+  try {
+    const keys = await db.all("SELECT id, target_api_key FROM api_keys");
+    for (const key of keys) {
+      if (key.target_api_key && !key.target_api_key.includes(":")) {
+        const encryptedKey = encrypt(key.target_api_key);
+        await db.run("UPDATE api_keys SET target_api_key = ? WHERE id = ?", [encryptedKey, key.id]);
+        console.log(`[Migration] API key encrypted for ID: ${key.id}`);
+      }
+    }
+  } catch (err) {
+    console.error("Migration error:", err);
+  }
+}
+
+async function migrateToTargetKeysTable() {
+  try {
+    // target_keys tablosu boşsa, api_keys tablosundaki verileri taşı
+    const targetCount = await db.get("SELECT COUNT(*) as count FROM target_keys");
+    if (targetCount && targetCount.count === 0) {
+      const keys = await db.all("SELECT id, target_api_key, provider FROM api_keys");
+      for (const key of keys) {
+        if (key.target_api_key) {
+          const targetId = `targetkey_${Math.random().toString(36).substring(2, 15)}`;
+          await db.run(
+            `INSERT INTO target_keys (id, api_key_id, target_api_key, provider, priority, is_active)
+             VALUES (?, ?, ?, ?, 1, 1)`,
+            [targetId, key.id, key.target_api_key, key.provider]
+          );
+          console.log(`[Migration] Migrated key ${key.id} to target_keys table`);
+        }
+      }
+    }
+  } catch (err) {
+    console.error("Migration to target_keys failed:", err);
+  }
 }
 
 export async function checkLimits(keyId: string): Promise<{ allowed: boolean; reason?: string }> {
@@ -73,7 +129,6 @@ export async function checkLimits(keyId: string): Promise<{ allowed: boolean; re
     [keyId]
   );
   
-  // MVP için dakika başına en fazla 30 isteğe izin ver
   if (loopCount && loopCount.count >= 30) {
     return { allowed: false, reason: "loop_detected" };
   }
@@ -142,23 +197,59 @@ export async function createApiKey(
   monthlyLimit: number
 ) {
   const newId = `captoken_${Math.random().toString(36).substring(2, 15)}${Math.random().toString(36).substring(2, 15)}`;
+  const encryptedKey = encrypt(targetApiKey);
+  
+  // api_keys tablosuna ekle
   await db.run(
     `INSERT INTO api_keys (id, name, target_api_key, provider, daily_limit, monthly_limit)
      VALUES (?, ?, ?, ?, ?, ?)`,
-    [newId, name, targetApiKey, provider, dailyLimit, monthlyLimit]
+    [newId, name, encryptedKey, provider, dailyLimit, monthlyLimit]
   );
+  
+  // target_keys tablosuna da ilk hedef anahtar olarak ekle
+  const targetId = `targetkey_${Math.random().toString(36).substring(2, 15)}`;
+  await db.run(
+    `INSERT INTO target_keys (id, api_key_id, target_api_key, provider, priority, is_active)
+     VALUES (?, ?, ?, ?, 1, 1)`,
+    [targetId, newId, encryptedKey, provider]
+  );
+  
   return { id: newId, name, provider, dailyLimit, monthlyLimit };
 }
 
 export async function listApiKeys() {
-  // Her anahtar için bugünkü harcamayı da içeren liste
   const today = new Date().toISOString().split("T")[0];
-  return db.all(`
+  const keys = await db.all(`
     SELECT k.*, IFNULL(s.cost, 0.0) as spent_today, IFNULL(s.tokens_used, 0) as tokens_today
     FROM api_keys k
     LEFT JOIN usage_summary s ON k.id = s.api_key_id AND s.date = ?
     ORDER BY k.created_at DESC
   `, [today]);
+
+  const keysWithTargets = [];
+  for (const k of keys) {
+    const targets = await db.all("SELECT * FROM target_keys WHERE api_key_id = ? ORDER BY priority DESC", [k.id]);
+    const maskedTargets = targets.map(t => {
+      const decrypted = decrypt(t.target_api_key);
+      let masked = "••••••••••••";
+      if (decrypted.startsWith("sk-")) {
+        masked = `sk-••••${decrypted.substring(decrypted.length - 4)}`;
+      } else if (decrypted.length > 8) {
+        masked = `${decrypted.substring(0, 4)}••••${decrypted.substring(decrypted.length - 4)}`;
+      }
+      return {
+        ...t,
+        target_api_key: masked
+      };
+    });
+    
+    const { target_api_key, provider, ...rest } = k;
+    keysWithTargets.push({
+      ...rest,
+      targets: maskedTargets
+    });
+  }
+  return keysWithTargets;
 }
 
 export async function deleteApiKey(keyId: string) {
@@ -169,10 +260,37 @@ export async function toggleApiKey(keyId: string, isActive: boolean) {
   return db.run("UPDATE api_keys SET is_active = ? WHERE id = ?", [isActive ? 1 : 0, keyId]);
 }
 
+// --- Target Keys CRUD İşlemleri ---
+
+export async function addTargetKey(
+  apiKeyId: string,
+  targetApiKey: string,
+  provider: string,
+  priority: number
+) {
+  const encryptedKey = encrypt(targetApiKey);
+  const targetId = `targetkey_${Math.random().toString(36).substring(2, 15)}`;
+  await db.run(
+    `INSERT INTO target_keys (id, api_key_id, target_api_key, provider, priority, is_active)
+     VALUES (?, ?, ?, ?, ?, 1)`,
+    [targetId, apiKeyId, encryptedKey, provider, priority]
+  );
+  return { id: targetId, api_key_id: apiKeyId, provider, priority };
+}
+
+export async function deleteTargetKey(targetId: string) {
+  return db.run("DELETE FROM target_keys WHERE id = ?", [targetId]);
+}
+
+export async function toggleTargetKey(targetId: string, isActive: boolean) {
+  return db.run("UPDATE target_keys SET is_active = ? WHERE id = ?", [isActive ? 1 : 0, targetId]);
+}
+
+// --- Analytics ---
+
 export async function getAnalytics() {
   const today = new Date().toISOString().split("T")[0];
   
-  // Toplam harcama ve istek sayıları
   const summary = await db.get(`
     SELECT 
       SUM(cost) as total_cost,
@@ -181,7 +299,6 @@ export async function getAnalytics() {
     FROM usage_summary
   `);
 
-  // Son 7 günlük harcama grafiği için veri
   const dailyCosts = await db.all(`
     SELECT date, SUM(cost) as cost
     FROM usage_summary
@@ -190,7 +307,6 @@ export async function getAnalytics() {
     LIMIT 7
   `);
 
-  // Son 10 istek günlüğü
   const recentLogs = await db.all(`
     SELECT l.*, k.name as key_name
     FROM request_logs l
@@ -209,5 +325,16 @@ export async function getAnalytics() {
 }
 
 export async function getKeyDetails(keyId: string) {
-  return db.get("SELECT * FROM api_keys WHERE id = ?", [keyId]);
+  const key = await db.get("SELECT * FROM api_keys WHERE id = ?", [keyId]);
+  if (key) {
+    const targets = await db.all(
+      "SELECT * FROM target_keys WHERE api_key_id = ? AND is_active = 1 ORDER BY priority DESC, created_at ASC",
+      [keyId]
+    );
+    key.targets = targets.map(t => ({
+      ...t,
+      target_api_key: decrypt(t.target_api_key)
+    }));
+  }
+  return key;
 }

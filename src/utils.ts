@@ -1,4 +1,8 @@
 import { encodingForModel, getEncoding } from "js-tiktoken";
+import crypto from "crypto";
+
+// ... (existing pricing mapping stays same)
+
 
 // Model bazlı fiyatlandırma tarifesi (1 Milyon Token Başına Dolar)
 // Fiyatlar standart API maliyetlerine göre düzenlenmiştir.
@@ -94,4 +98,111 @@ export function extractPromptText(body: any): string {
     }
   }
   return text;
+}
+
+// ENCRYPTION_KEY'den sha256 kullanarak 32-byte'lık anahtar türetir
+const getEncryptionKey = (): Buffer => {
+  const secret = process.env.ENCRYPTION_KEY || "default_captoken_encryption_key_32bytes_long";
+  return crypto.createHash("sha256").update(secret).digest();
+};
+
+/**
+ * Metni AES-256-CBC algoritmasıyla şifreler.
+ */
+export function encrypt(text: string): string {
+  const iv = crypto.randomBytes(16);
+  const cipher = crypto.createCipheriv("aes-256-cbc", getEncryptionKey(), iv);
+  let encrypted = cipher.update(text, "utf8", "hex");
+  encrypted += cipher.final("hex");
+  return `${iv.toString("hex")}:${encrypted}`;
+}
+
+/**
+ * Şifrelenmiş metni çözer. Hata alırsa veya şifresiz ise düz metin (plaintext) olarak döner.
+ */
+export function decrypt(text: string): string {
+  try {
+    const parts = text.split(":");
+    if (parts.length !== 2) {
+      return text;
+    }
+    const iv = Buffer.from(parts[0], "hex");
+    const encryptedText = parts[1];
+    const decipher = crypto.createDecipheriv("aes-256-cbc", getEncryptionKey(), iv);
+    let decrypted = decipher.update(encryptedText, "hex", "utf8");
+    decrypted += decipher.final("utf8");
+    return decrypted;
+  } catch (error) {
+    return text;
+  }
+}
+
+/**
+ * Slack veya Discord webhook adresine markdown formatında zengin içerikli uyarı gönderir.
+ */
+export async function sendWebhookAlert(message: string, details: Record<string, any>) {
+  const webhookUrl = process.env.GLOBAL_WEBHOOK_URL;
+  if (!webhookUrl) {
+    return;
+  }
+
+  const payload = {
+    text: `⚠️ *CapToken Güvenlik/Bütçe Uyarısı* ⚠️\n\n*Durum:* ${message}\n` +
+          Object.entries(details).map(([k, v]) => `*${k}:* \`${v}\``).join("\n") +
+          `\n\n📅 _Zaman: ${new Date().toLocaleString('tr-TR')}_`
+  };
+
+  try {
+    const res = await fetch(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      console.error(`Webhook sending failed: ${res.status} - ${await res.text()}`);
+    }
+  } catch (err: any) {
+    console.error(`Webhook sending error: ${err.message}`);
+  }
+}
+
+/**
+ * Yönetici oturumu için imzalı bir session token oluşturur (24 saat geçerli).
+ */
+export function generateAdminSession(): string {
+  const expiresAt = Date.now() + 24 * 60 * 60 * 1000;
+  const sessionData = `admin:${expiresAt}`;
+  const secret = process.env.ENCRYPTION_KEY || "default_auth_secret";
+  const signature = crypto.createHmac("sha256", secret).update(sessionData).digest("hex");
+  return `${sessionData}:${signature}`;
+}
+
+/**
+ * Oturum token'ını doğrular.
+ */
+export function verifyAdminSession(token: string): boolean {
+  try {
+    const parts = token.split(":");
+    if (parts.length !== 3) {
+      return false;
+    }
+    const sessionData = `${parts[0]}:${parts[1]}`;
+    const signature = parts[2];
+    
+    const secret = process.env.ENCRYPTION_KEY || "default_auth_secret";
+    const expectedSignature = crypto.createHmac("sha256", secret).update(sessionData).digest("hex");
+    
+    if (signature !== expectedSignature) {
+      return false;
+    }
+
+    const expiresAt = parseInt(parts[1], 10);
+    if (Date.now() > expiresAt) {
+      return false;
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
 }
